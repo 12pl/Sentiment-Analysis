@@ -1,0 +1,138 @@
+# Import necessary libraries
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from textblob import TextBlob
+from wordcloud import WordCloud
+from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
+from nltk.tokenize import word_tokenize, sent_tokenize
+from collections import Counter
+import nltk
+from google.colab import files
+import io
+from openpyxl import load_workbook
+from openpyxl.drawing.image import Image
+import matplotlib.pyplot as plt
+
+# Download NLTK tokenizer data
+nltk.download('punkt')
+
+# Load the dataset (replace with your dataset path in Google Colab)
+df = pd.read_excel('/content/Telco_customer_churn.xlsx')  # Update this path as needed
+
+# Check the dataset and the column names
+print("Dataset columns:", df.columns)
+
+# Inspect the first few rows to understand the structure
+print(df.head())
+
+# Check if 'Churn Reason' or any relevant column for text exists
+if 'Churn Reason' in df.columns:
+    text_column = 'Churn Reason'
+elif 'Feedback' in df.columns:
+    text_column = 'Feedback'
+else:
+    raise KeyError("No 'Churn Reason' or 'Feedback' column found in the dataset. Please update the column name.")
+
+# Drop missing values if any
+df.dropna(subset=[text_column], inplace=True)
+
+# Convert the selected text column to string type if not already
+df[text_column] = df[text_column].astype(str)
+
+# Tokenize words and sentences from the text column
+df['Word Tokens'] = df[text_column].apply(word_tokenize)
+df['Sentence Tokens'] = df[text_column].apply(sent_tokenize)
+
+# Bag of Words with n-grams
+vectorizer = CountVectorizer(ngram_range=(1, 2), stop_words='english')
+X_bow = vectorizer.fit_transform(df[text_column])
+feature_names = vectorizer.get_feature_names_out()
+
+# TF-IDF Vectorization
+tfidf_vectorizer = TfidfVectorizer(stop_words='english')
+X_tfidf = tfidf_vectorizer.fit_transform(df[text_column])
+
+# Sentiment Analysis: Polarity and Subjectivity
+df['Polarity'] = df[text_column].apply(lambda x: TextBlob(x).sentiment.polarity)
+df['Subjectivity'] = df[text_column].apply(lambda x: TextBlob(x).sentiment.subjectivity)
+
+# Generate visualizations and save them as images
+def save_plot_as_image(plot_func, file_name):
+    plot_func()
+    plt.savefig(file_name)
+    plt.close()
+
+# Generate WordCloud and save it
+all_comments = " ".join(df[text_column].tolist())
+wordcloud = WordCloud(width=800, height=400, background_color='white').generate(all_comments)
+save_plot_as_image(lambda: plt.imshow(wordcloud, interpolation='bilinear'), 'wordcloud.png')
+
+# Save Boxplot for Polarity and Subjectivity
+save_plot_as_image(lambda: sns.boxplot(data=df[['Polarity', 'Subjectivity']]), 'boxplot.png')
+
+# Save Scatterplot for Polarity vs Subjectivity
+save_plot_as_image(lambda: sns.scatterplot(x='Polarity', y='Subjectivity', data=df), 'scatterplot.png')
+
+# Save Histogram for Polarity
+save_plot_as_image(lambda: df['Polarity'].hist(bins=30), 'polarity_histogram.png')
+
+# Word Frequency Bar chart
+all_words = " ".join(df[text_column]).split()
+word_freq = Counter(all_words)
+common_words = word_freq.most_common(10)
+words, counts = zip(*common_words)
+save_plot_as_image(lambda: plt.bar(words, counts), 'word_frequency.png')
+
+# Pie chart for word frequency
+save_plot_as_image(lambda: plt.pie(counts, labels=words, autopct='%1.1f%%'), 'word_frequency_pie.png')
+
+# Save all results in an Excel file
+output_file_path = 'Sentiment_Analysis_Report.xlsx'
+with pd.ExcelWriter(output_file_path, engine='openpyxl') as writer:
+    # Save the dataframe with sentiment scores
+    df.to_excel(writer, sheet_name='Sentiment Data', index=False)
+
+    # Create a Word Frequency dataframe
+    word_freq_df = pd.DataFrame(common_words, columns=['Word', 'Frequency'])
+    word_freq_df.to_excel(writer, sheet_name='Word Frequency', index=False)
+    
+    # Save Correlation and Covariance matrices
+    correlation_matrix = df[['Polarity', 'Subjectivity']].corr()
+    covariance_matrix = df[['Polarity', 'Subjectivity']].cov()
+    
+    correlation_matrix.to_excel(writer, sheet_name='Correlation Matrix')
+    covariance_matrix.to_excel(writer, sheet_name='Covariance Matrix')
+
+# Add images (charts) and insights to the Excel file
+wb = load_workbook(output_file_path)
+ws = wb.create_sheet('Graphs and Insights')
+
+# Add images to the Excel file
+images_to_add = ['wordcloud.png', 'boxplot.png', 'scatterplot.png', 'polarity_histogram.png', 'word_frequency.png', 'word_frequency_pie.png']
+for idx, img_path in enumerate(images_to_add, start=1):
+    img = Image(img_path)
+    ws.add_image(img, f'A{idx*20}')  # Adjust positioning by changing cell reference
+
+# Add insights and advice
+insights = [
+    f"Average Polarity: {df['Polarity'].mean():.2f}",
+    f"Average Subjectivity: {df['Subjectivity'].mean():.2f}",
+    "Advice: "
+]
+if df['Polarity'].mean() < 0:
+    insights.append("The overall sentiment is negative, indicating dissatisfaction among customers.")
+    insights.append("ADVICE: Investigate common issues, improve customer service, and offer promotions to reduce churn.")
+else:
+    insights.append("The overall sentiment is neutral or positive, indicating general satisfaction.")
+    insights.append("ADVICE: Continue to provide good service and proactively address potential issues.")
+
+for idx, insight in enumerate(insights, start=1):
+    ws[f'A{len(images_to_add) * 20 + idx}'] = insight
+
+# Save updated Excel file
+wb.save(output_file_path)
+
+# Download the Excel file
+files.download(output_file_path)
